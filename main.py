@@ -26,19 +26,42 @@ NAME_MAP = {
     "هانی": "Hani",
     "ماتادور": "Matador",
     "نیلوفر": "Niloofar",
-    "هانیه": "Hanieh"
+    "هانیه": "Hanieh",
+    "رضا": "Reza",
+    "آتنا": "Atena",
+    "اتنا": "Atena"
 }
 
+BUILDER_PATTERN = r"فایتر|اهورا|صبحان|سبحان|یکتا|ساره|مجی|گاد\s?فادر|فرید|هانتر|هانی|ماتادور|نیلوفر|هانیه|رضا|آتنا|اتنا"
 SCENARIO_PATTERN = r"جک|مذاکره|بازپرس|تفنگدار|پدرخوانده|فکت|شرلوک|قاتل"
-BUILDER_PATTERN = r"فایتر|اهورا|صبحان|سبحان|یکتا|ساره|مجی|گاد\s?فادر|فرید|هانتر|هانی|ماتادور|نیلوفر|هانیه"
-START_REGEX = re.compile(rf"^({SCENARIO_PATTERN})\s+({BUILDER_PATTERN})(\s+فور)?$")
-END_REGEX = re.compile(r"^پایان\s+(\S+)(\s+فور)?$")
-
+START_REGEX = re.compile(rf"^({SCENARIO_PATTERN})\s+(.+?)(\s+فور)?$")
+END_REGEX = re.compile(r"^پایان\s+(.+?)(\s+فور)?$")
 active_games = {}
+
+def persian_to_finglish(text: str) -> str:
+    mapping = {
+        'ا': 'a', 'آ': 'a', 'ب': 'b', 'پ': 'p', 'ت': 't', 'ث': 's',
+        'ج': 'j', 'چ': 'ch', 'ح': 'h', 'خ': 'kh', 'د': 'd',
+        'ذ': 'z', 'ر': 'r', 'ز': 'z', 'ژ': 'zh', 'س': 's',
+        'ش': 'sh', 'ص': 's', 'ض': 'z', 'ط': 't', 'ظ': 'z',
+        'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'gh', 'ک': 'k',
+        'گ': 'g', 'ل': 'l', 'م': 'm', 'ن': 'n', 'و': 'v',
+        'ه': 'h', 'ی': 'y', 'ي': 'i', 'ئ': 'e',
+        ' ': ' ', '؟': '?', '،': ',', '؛': ';',
+        '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+        '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+        'َ': 'a', 'ُ': 'o', 'ِ': 'e'
+    }
+    result = ''
+    for ch in text:
+        result += mapping.get(ch, ch)
+    return result.title().replace(' ', '')
 
 def normalize_builder_name(raw: str) -> str:
     key = re.sub(r"\s+", " ", raw).strip()
-    return NAME_MAP.get(key, raw)
+    if key in NAME_MAP:
+        return NAME_MAP[key]
+    return persian_to_finglish(key)
 
 def get_shamsi_now() -> str:
     return jdatetime.datetime.now().strftime("%H:%M - %Y/%m/%d ")
@@ -50,45 +73,18 @@ def log_error(context: str, error: Exception) -> None:
     traceback.print_exc()
     print("-" * 50)
 
-async def compress_image(image_bytes: bytes, max_dimension: int = 960, quality: int = 65) -> tuple[bytes, int, int]:
-    def _compress():
+async def compress_image(image_bytes: bytes, max_dimension: int = 914) -> tuple[bytes, int, int]:
+    def _resize_only():
         img = Image.open(io.BytesIO(image_bytes))
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
-
-        current_dim = max_dimension
-        current_quality = quality
-        target_size = 30 * 1024
-        max_attempts = 15
-
-        for attempt in range(max_attempts):
-            if max(img.size) > current_dim:
-                img_copy = img.copy()
-                img_copy.thumbnail((current_dim, current_dim), Image.LANCZOS)
-            else:
-                img_copy = img
-
-            buffer = io.BytesIO()
-            img_copy.save(buffer, format="JPEG", quality=current_quality, optimize=True, exif=b"")
-            data = buffer.getvalue()
-
-            if len(data) <= target_size:
-                print(f"📦 حجم عکس فشرده: {len(data)/1024:.1f} کیلوبایت | ابعاد: {img_copy.size[0]}x{img_copy.size[1]}")
-                return data, img_copy.size[0], img_copy.size[1]
-
-            if current_quality > 15:
-                current_quality -= 10
-                continue
-            else:
-                current_dim -= 150
-                current_quality = 55
-                if current_dim < 150:
-                    break
-
-        print(f"📦 حجم عکس فشرده: {len(data)/1024:.1f} کیلوبایت (بهینه‌ترین حالت) | ابعاد: {img_copy.size[0]}x{img_copy.size[1]}")
-        return data, img_copy.size[0], img_copy.size[1]
-
-    return await asyncio.to_thread(_compress)
+        img.thumbnail((max_dimension, max_dimension), Image.LANCZOS)
+        buffer = io.BytesIO()
+        img.save(buffer, format="WEBP", lossless=True, quality=100)
+        data = buffer.getvalue()
+        print(f"📷 ابعاد نهایی: {img.size[0]}x{img.size[1]} | حجم: {len(data)/1024:.1f} KB (WebP Lossless)")
+        return data, img.size[0], img.size[1]
+    return await asyncio.to_thread(_resize_only)
 
 bot = Client("bot")
 
@@ -115,14 +111,14 @@ async def handle_start(update: Update):
     try:
         compressed, w, h = await compress_image(raw)
     except Exception as e:
-        log_error("فشرده‌سازی عکس شروع", e)
+        log_error("پردازش عکس شروع", e)
         return
 
     now = get_shamsi_now()
     caption = (
         "🌱بِه نامِ خوبی راستی و پاکی 🌱\n\n"
         f"🧑‍💻سازنده دک :  ✺ DoN 𖤍 {builder_en}✺\n\n"
-        f"📜سناریو: {scenario_fa} ➪ دونیتو\n\n"
+        f"📜سناریو: {scenario_fa} ➪ دُنیتو\n\n"
         f"⏱︎ساعت شروع : {now}\n\n"
         "🔖برای عضویت و ارتباط با لیدر گروه:\n\n"
         "@Don55555\n\n"
@@ -206,13 +202,13 @@ async def handle_end(update: Update):
     try:
         compressed_bytes, new_w, new_h = await compress_image(raw_bytes)
     except Exception as e:
-        log_error("فشرده‌سازی عکس پایان", e)
+        log_error("پردازش عکس پایان", e)
         return
 
     now = get_shamsi_now()
     caption = (
         "🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆🏆\n\n"
-        f"🎞سناریو:    {game['scenario']}  ➪  دونیتو\n\n"
+        f"🎞سناریو:    {game['scenario']}  ➪  دُنیتو\n\n"
         f"🧑‍💻سازنده لابی: ✺DσN 𖤍 {game['builder']}✺\n\n"
         f"🥇برنده : {winner}  ➪ 🏆\n\n"
         f"⏱︎ساعت پایان : {now}\n\n"
@@ -249,7 +245,7 @@ async def handle_end(update: Update):
 )
 async def help_handler(update: Update):
     help_text = (
-        "**راهنمای ربات بنرگذار دونیتو**\n\n"
+        "**راهنمای ربات بنرگذار دُنیتو**\n\n"
         "درود بر گاد ۲ های عزیز! 🙌\n"
         "این ربات برای ساخت و ارسال خودکار بنر بازی‌ها طراحی شده. لطفاً فقط گاد ۲ ها از آن استفاده کنند تا نظم کار حفظ شود.\n\n"
         "---\n\n"
@@ -278,7 +274,7 @@ async def help_handler(update: Update):
         "• هانتر\n\n"
         "اگر نامی جا افتاده، به ما اطلاع دهید تا اضافه شود.\n\n"
         "**۳. فور (اختیاری)**\n"
-        "با اضافه کردن کلمه «فور»، ربات بنر را علاوه بر گروه اصلی، به گروه رسمی دونیتو **فوروارد** می‌کند. بدون آن، بنر فقط در گروه خودتان ارسال می‌شود.\n\n"
+        "با اضافه کردن کلمه «فور»، ربات بنر را علاوه بر گروه اصلی، به گروه رسمی دُنیتو **فوروارد** می‌کند. بدون آن، بنر فقط در گروه خودتان ارسال می‌شود.\n\n"
         "---\n\n"
         "**مثال شروع**\n\n"
         "با فوروارد:\n"
@@ -299,7 +295,7 @@ async def help_handler(update: Update):
         "• برای پایان بازی نیازی به ریپلای روی بنر شروع نیست؛ ربات خودکار اولین بازی آغازشده را می‌بندد.\n"
         "• اگر چند بازی همزمان فعال دارید، اولویت پایان با بازی‌ای است که زودتر شروع شده.\n"
         "• حتماً یک عکس همراه کپشن باشد، در غیر این‌صورت ربات اقدامی نمی‌کند.\n"
-        "• پردازش عکس و فشرده‌سازی آن ممکن است چند لحظه زمان ببرد.\n\n"
+        "• پردازش عکس ممکن است چند لحظه زمان ببرد.\n\n"
         "با آرزوی بازی‌های پرهیجان و منظم برای شما ✨"
     )
 
