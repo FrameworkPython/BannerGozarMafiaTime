@@ -160,7 +160,7 @@ HELP_TEXT = (
     "• توقف: !stop\n"
     "• راه‌اندازی: !start\n"
 )
-)
+
 
 active_games = {}
 pending_banners = {}
